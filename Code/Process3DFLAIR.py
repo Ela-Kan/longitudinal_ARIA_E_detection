@@ -522,8 +522,6 @@ class Process3DFLAIR():
             _ = hp(normalized[8:11], masks[8:11])
             plt.show()  
 
-
-
             # only retain the desired subject's normalised data for future use
             current_subject_normalized = []
             for i, id in enumerate(image_subject_labels):
@@ -534,11 +532,22 @@ class Process3DFLAIR():
 
         # save normalised images
         normalised_file_format = self.subject_normalised_directory + self.subject_id+'_{}_D1.nii.gz'
+
+        # ensure that the coordinate systems are the same by extracting a test original image before normalisation
+        brain_file_format = self.subject_bias_directory + self.subject_id +'_{}_D1_restore.nii.gz'
+        test_coordinate_frame = nib.load(brain_file_format.format(str(self.time_points_to_consider[0]).zfill(2)))
+        test_coordinate_frame_qform = test_coordinate_frame.header.get_qform()
+        test_coordinate_frame_sform = test_coordinate_frame.header.get_sform()
+
+
         for i in range(len(self.time_points_to_consider)):
             current_img_str = str(0)+str(self.time_points_to_consider[i]) # current time point string
-            norm_nifti = nib.Nifti1Image(normalized[i], affine=np.eye(4))
+            norm_nifti = nib.Nifti1Image(normalized[i], affine=None)
+            norm_nifti.header.set_qform(test_coordinate_frame_qform) # set the qform to be the same as the original image to ensure consistent coordinate frames 
+            norm_nifti.header.set_sform(test_coordinate_frame_sform)
             nib.save(norm_nifti, normalised_file_format.format(current_img_str))
-
+        
+        
         # reformat the images into standard format
         for i in range(len(self.time_points_to_consider)):
             current_img_str = str(0)+str(self.time_points_to_consider[i]) # current time point string
@@ -546,6 +555,8 @@ class Process3DFLAIR():
             reorient.inputs.in_file = normalised_file_format.format(current_img_str)
             reorient.inputs.out_file = normalised_file_format.format(current_img_str)
             res = reorient.run()
+        
+        return None
 
     def subtractImages(self, in_image_num, image_to_subtract_num, out_file, threshold = False):
         # input = time point flag for images e.g. 1 or 2
@@ -618,7 +629,12 @@ class Process3DFLAIR():
                                 variances[i,j,k] = np.var(voxel_intensities)
 
         # save variance map
-        var_nifti = nib.Nifti1Image(variances, affine=np.eye(4))
+        var_nifti = nib.Nifti1Image(variances, affine=None)
+        # need to put variance into the same coordinate frame as the other images
+        # extract the coordinate frame from the first image for test
+        test_coordinate_frame = nib.load(normalised_file_format.format(str(self.time_points_to_consider[0]).zfill(2)))
+        var_nifti.header.set_qform(test_coordinate_frame.header.get_qform())
+        var_nifti.header.set_sform(test_coordinate_frame.header.get_sform())
         nib.save(var_nifti, out_file)
         
         return None
@@ -747,10 +763,16 @@ class Process3DFLAIR():
                 
             # save the gradient map for the current time point
             grad_nifti = nib.Nifti1Image(gradient_map, affine=np.eye(4))
+            # ensure the grad map is in the correct coordinate frame
+            test_coordinate_frame = nib.load(normalised_file_format.format(str(self.time_points_to_consider[0]).zfill(2)))
+            grad_nifti.header.set_qform(test_coordinate_frame.header.get_qform())
+            grad_nifti.header.set_sform(test_coordinate_frame.header.get_sform())
             nib.save(grad_nifti, gradient_map_file_format.format(str(map_num)))
             print('Computed map ' + str(map_num) + ' out of ' + str(number_grad_maps))
 
-    def calcZScoreMap(self, in_map_path, z_score_out_file, significant_z_out_file, inter_subject_files = [], inter_subject_mask_files = []):
+    def calcZScoreMap(self, in_map_path, z_score_out_file, log_map = False):
+        # Log map is whether we want to take the log of the map before computing the Z-score
+
          # load in the designated map to compute the Z-score for and the brain mask 
         map_nifti = nib.load(in_map_path).get_fdata()  
         brain_file_mask_format = self.subject_brain_directory + 'masks/'+ self.subject_id+'_{}_D1.nii'  
@@ -760,33 +782,24 @@ class Process3DFLAIR():
         # flatten the map_nifti and the mask
         flat_map = map_nifti.flatten()
         flat_mask = mask.flatten()
-        flat_mask_bool = [not not x for x in flat_mask] # convert np.array to boolean for indexing
+        flat_mask_bool = flat_mask.astype(np.bool_) # convert np.array to boolean for indexing
 
         # only retain the brain values from the flat map
         flat_map_brain = flat_map[flat_mask_bool]
         
-
-        # if we have intersubject distribution consideration, we need to add these intensities to the flattened array
-        if len(inter_subject_files): # if the input isn't empty
-            print('Considering multiple subjects in distribution.')
-            for i in range(len(inter_subject_files)): # for all of the other subjects, load in their image and mask
-                flat_current_image = nib.load(inter_subject_files[i]).get_fdata().flatten()
-                flat_current_mask = nib.load(inter_subject_mask_files[i]).get_fdata().flatten()
-                flat_current_mask_bool = [not not x for x in flat_current_mask] # convert np.array to boolean for indexing
-                flat_current_brain = flat_current_image[flat_current_mask_bool]
-                # pool the current extracted brain into the intensity list for the flat brains
-                flat_map_brain = np.append(flat_map_brain, flat_current_brain)
-
-
         # compute mean and standard deviation of sample dependent on the desired distribution
+        if log_map == True: # if we want a log map
+            flat_map_brain = np.log(flat_map_brain)
+
         mu = np.mean(flat_map_brain)
         stdev = np.std(flat_map_brain)
+
+        print(mu)
+        print(stdev)
 
         # preallocate Z-Score map image
         Z_score_map = np.zeros(map_nifti.shape)
 
-        # also create a map retaining only the 'significant change (i.e. 2 std deviations away from 0)
-        significant_Z_score_map = np.zeros(map_nifti.shape)
 
         # go through all points in the two images to compute the Z-score
         # iterate through each 'voxel' in the images
@@ -795,21 +808,23 @@ class Process3DFLAIR():
                         for k in range(Z_score_map.shape[2]):
                                 # if the mask says that there is no brain here, continue to next voxel
                                 if mask[i,j,k] == 0:
-                                    continue
+                                     Z_score_map[i,j,k] = 0
                                 else:
-                                    z_score = (map_nifti[i,j,k] - mu)/stdev
+                                    map_value = map_nifti[i,j,k]
+                                    if log_map == True: # if we want a log map
+                                         map_value = np.log(map_value)
+                                    z_score = (map_value - mu)/stdev
                                     Z_score_map[i,j,k] = z_score
 
-                                    if (z_score > 1.08) or (z_score <-1.08): # if the z_score is significant, i.e. 1.08 stdevs away
-                                         significant_Z_score_map[i,j,k] = z_score
-                                    else: 
-                                         significant_Z_score_map[i,j,k] = 0
                 
         # save the Z-score maps
-        Z_score_nifti = nib.Nifti1Image(Z_score_map, affine=np.eye(4))
-        significant_Z_score_nifti = nib.Nifti1Image(significant_Z_score_map, affine=np.eye(4))
+        Z_score_nifti = nib.Nifti1Image(Z_score_map, affine=None)
+        # ensure that the Z-score map is in the right coordinate frame
+        test_coordinate_frame = nib.load(in_map_path)
+        Z_score_nifti.header.set_qform(test_coordinate_frame.header.get_qform())
+        Z_score_nifti.header.set_sform(test_coordinate_frame.header.get_sform())
+
         nib.save(Z_score_nifti, z_score_out_file)
-        nib.save(significant_Z_score_nifti, significant_z_out_file)
         print('Computed Z-Score map')
 
         return None
@@ -831,24 +846,24 @@ if __name__ == "__main__":
     test_time_points_to_consider = [1,2,3,4,5]
 
     # define the type of registration we'd like to use
-    registration_method = 'rigidfsl'
+    registration_method = 'affinefsl'
 
-    # we want to normalise across all patients
-    inter_subject = True
+    # we don't want to normalise across all patients
+    inter_subject = False
 
     # initialise a preprocess pipeline based on the test subject
     testProcess3DFLAIR = Process3DFLAIR(subject_info_df, test_subject_id, test_total_num_time_points, test_time_points_to_consider, registration_method, inter_subject) 
 
     #testProcess3DFLAIR.intensityNormalisation(useBiasCorrected = True)
     
-    """
+   
     # run variance pipeline
-    out_file = "/home/ela/Documents/B-RAPIDD/B-RAP_0100/3D-FLAIR/variance_maps/affine/intersubnormalised_all_timepoints_rigid.nii.gz"
+    #out_file = "/home/ela/Documents/B-RAPIDD/B-RAP_0100/3D-FLAIR/variance_maps/B_RAPP_0100_var.nii.gz"
    
     #testProcess3DFLAIR.runVariancePipeline(out_file)
-    testProcess3DFLAIR.calcVariance(out_file) # use this if all of the preprocessing has already occurred
+    #testProcess3DFLAIR.calcVariance(out_file) # use this if all of the preprocessing has already occurred
     
-    """
+
     
     
     """
@@ -871,13 +886,13 @@ if __name__ == "__main__":
 
     """
 
+     
     # run z-score map calculation for the variance and gradient maps
-    z_score_out_file = "/home/ela/Documents/B-RAPIDD/B-RAP_0100/3D-FLAIR/z_score_maps/affine_intrasubject_no_csf/variance_z_score_map_affine_csf_only.nii.gz" # variance 
-    significant_z_out_file  = "/home/ela/Documents/B-RAPIDD/B-RAP_0100/3D-FLAIR/z_score_maps/affine_intrasubject_no_csf/significant_variance_z_score_map_affine_csf_only.nii.gz" 
-    in_map_path = "/home/ela//Documents/B-RAPIDD/B-RAP_0100/3D-FLAIR/variance_maps/affine/no_csf/intrasubnormalised_all_timepoints_csf_only.nii.gz"
-    #inter_subject_files = ["/home/ela/Documents/B-RAPIDD/B-RAP_0100/3D-FLAIR/variance_maps/rigid/intersubnormalised_all_timepoints_rigid.nii.gz","/home/ela/Documents/B-RAPIDD/B-RAP_0028/3D-FLAIR/variance_maps/rigid/intersubnormalised_all_timepoints_rigid.nii.gz"]
-    #inter_subject_mask_files = ["/home/ela/Documents/B-RAPIDD/B-RAP_0100/3D-FLAIR/brain_nifti/masks/B-RAP_0100_05_D1.nii", "/home/ela/Documents/B-RAPIDD/B-RAP_0028/3D-FLAIR/brain_nifti/masks/B-RAP_0028_03_D1.nii"]
-    testProcess3DFLAIR.calcZScoreMap(in_map_path, z_score_out_file, significant_z_out_file)
+    z_score_in_file = f"/home/ela/Documents/B-RAPIDD/{test_subject_id}/3D-FLAIR/variance_maps/{test_subject_id}_var.nii.gz" # variance
+    z_score_out_file = f"/home/ela/Documents/B-RAPIDD/{test_subject_id}/3D-FLAIR/z_score_maps/variance/z_score_map.nii.gz" # variance 
+    log_map = True # we need to take the log of the variance maps to make it more 'normal'
+    testProcess3DFLAIR.calcZScoreMap(z_score_in_file, z_score_out_file, log_map) 
+    
 
     """
 
@@ -925,8 +940,12 @@ if __name__ == "__main__":
 
     # correct bias field
     #testProcess3DFLAIR.correctBiasField(method = 'FSL')
-    #testProcess3DFLAIR.intensityNormalisation(useBiasCorrected = True)
+
+    testProcess3DFLAIR.intensityNormalisation(useBiasCorrected = True)
+    
 
     # extract T1 brain
+
+    
     
     """
