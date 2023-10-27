@@ -595,7 +595,7 @@ class Process3DFLAIR():
         # Step 1) Extract brain using HD-BET and mask
         #self.extractBrain()
         # Step 2) Perform bias field correction
-        #self.correctBiasField(method = 'FSL')
+        self.correctBiasField(method = 'FSL')
         # Step 3) Perform intensity normalisation
         self.intensityNormalisation(useBiasCorrected = True)
         # Step 4: Compute subtraction map
@@ -643,7 +643,7 @@ class Process3DFLAIR():
         # Requires images to be in NIFTI already
 
         # Step 1) Extract brain using HD-BET and mask
-        ##self.extractBrain()
+        #self.extractBrain()
         # Step 2) Perform bias field correction
         self.correctBiasField(method = 'FSL')
         # Step 3) Perform intensity normalisation
@@ -665,7 +665,7 @@ class Process3DFLAIR():
     def calcGradientMaps(self, out_folder, days_between_scans):
         
         # load in all images that are normalised in the time series and their corresponding masks
-        normalised_file_format = self.subject_normalised_directory + '/rigid/' + self.subject_id+'_{}_D1.nii.gz' # only consider rigid registration here
+        normalised_file_format = self.subject_normalised_directory + self.subject_id+'_{}_D1.nii.gz' # only consider rigid registration here
         brain_file_mask_format = self.subject_brain_directory + 'masks/'+ self.subject_id+'_{}_D1.nii'  
         gradient_map_file_format = out_folder + self.subject_id+'_map_{}.nii.gz'  
         image_paths = [] # initialise variables
@@ -762,7 +762,7 @@ class Process3DFLAIR():
                                             gradient_map[i,j,k] = slope
                 
             # save the gradient map for the current time point
-            grad_nifti = nib.Nifti1Image(gradient_map, affine=np.eye(4))
+            grad_nifti = nib.Nifti1Image(gradient_map, affine=None)
             # ensure the grad map is in the correct coordinate frame
             test_coordinate_frame = nib.load(normalised_file_format.format(str(self.time_points_to_consider[0]).zfill(2)))
             grad_nifti.header.set_qform(test_coordinate_frame.header.get_qform())
@@ -835,15 +835,15 @@ class Process3DFLAIR():
 if __name__ == "__main__":
 
     # open the subject info table and turn into pd dataframe
-    subject_info_df = pd.read_csv('~/Documents/MRes_Project/subject_info.csv')
+    subject_info_df = pd.read_csv('/home/ela/Documents/longitudinal_ARIA_E_detection/subject_info.csv')
     print(subject_info_df) # print current subject info
 
     # select a test patient from the information list
-    test_subject_id = subject_info_df.Subject_ID[1]
-    test_total_num_time_points = subject_info_df.Time_Points[1] # auto use all from excel sheet
+    test_subject_id = subject_info_df.Subject_ID[0]
+    test_total_num_time_points = 6# auto use all from excel sheet
     
     # select the time points we want to consider in analysis
-    test_time_points_to_consider = [1,2,3,4,5]
+    test_time_points_to_consider = [1,2,3,4,5,6]
 
     # define the type of registration we'd like to use
     registration_method = 'affinefsl'
@@ -858,7 +858,7 @@ if __name__ == "__main__":
     
    
     # run variance pipeline
-    #out_file = "/home/ela/Documents/B-RAPIDD/B-RAP_0100/3D-FLAIR/variance_maps/B_RAPP_0100_var.nii.gz"
+    #out_file = "/home/ela/Documents/B-RAPIDD/B-RAP_0027/3D-FLAIR/variance_maps/B_RAPP_0027_var.nii.gz"
    
     #testProcess3DFLAIR.runVariancePipeline(out_file)
     #testProcess3DFLAIR.calcVariance(out_file) # use this if all of the preprocessing has already occurred
@@ -878,21 +878,21 @@ if __name__ == "__main__":
     
     """
 
-    """
+    
     # run gradient map calculation
-    out_folder = "/home/ela/Documents/B-RAPIDD/B-RAP_0028/3D-FLAIR/gradient_maps/"
-    days_between_scans = [0, 29, 58, 88, 118]
+    out_folder = "/home/ela/Documents/B-RAPIDD/B-RAP_0027/3D-FLAIR/gradient_maps/"
+    days_between_scans = [0, 133, 232, 283, 296, 324]
     testProcess3DFLAIR.calcGradientMaps(out_folder, days_between_scans)
+  
+    
 
     """
-
-     
     # run z-score map calculation for the variance and gradient maps
     z_score_in_file = f"/home/ela/Documents/B-RAPIDD/{test_subject_id}/3D-FLAIR/variance_maps/{test_subject_id}_var.nii.gz" # variance
     z_score_out_file = f"/home/ela/Documents/B-RAPIDD/{test_subject_id}/3D-FLAIR/z_score_maps/variance/z_score_map.nii.gz" # variance 
     log_map = True # we need to take the log of the variance maps to make it more 'normal'
     testProcess3DFLAIR.calcZScoreMap(z_score_in_file, z_score_out_file, log_map) 
-    
+    """
 
     """
 
@@ -929,10 +929,10 @@ if __name__ == "__main__":
         """
     #testProcess3DFLAIR.calcZScoreMap(in_map_path, z_score_out_file, significant_z_out_file)
 
-    """
+    
 
     # convert all of the temporal scans from DICOM to NIFTI
-    #testProcess3DFLAIR.convertDICOMtoNIFTI() #
+    #testProcess3DFLAIR.convertDICOMtoNIFTI() # only need to do this once
     
     # extract brains
     #testProcess3DFLAIR.extractBrain()
@@ -941,11 +941,11 @@ if __name__ == "__main__":
     # correct bias field
     #testProcess3DFLAIR.correctBiasField(method = 'FSL')
 
-    testProcess3DFLAIR.intensityNormalisation(useBiasCorrected = True)
+    #testProcess3DFLAIR.intensityNormalisation(useBiasCorrected = True)
     
 
     # extract T1 brain
 
     
     
-    """
+    
