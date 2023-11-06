@@ -567,7 +567,8 @@ class Process3DFLAIR():
         image_to_subtract_path = normalised_file_format.format(str(image_to_subtract_num).zfill(2))
 
         # load in images for processing and convert to numpy arrays
-        in_image = np.array(nib.load(in_image_path).get_fdata())
+        input_data = nib.load(in_image_path)
+        in_image = np.array(input_data.get_fdata())
         image_to_subtract = np.array(nib.load(image_to_subtract_path).get_fdata())
 
         # subtract images
@@ -577,8 +578,10 @@ class Process3DFLAIR():
         if threshold == True:
             subtraction_img[subtraction_img < 0] = 0
 
-        # save subtraction image
-        sub_nifti = nib.Nifti1Image(subtraction_img, affine=np.eye(4))
+        # save subtraction image in the same space as input image
+        sub_nifti = nib.Nifti1Image(subtraction_img, affine=None)
+        sub_nifti.header.set_qform(input_data.header.get_qform())
+        sub_nifti.header.set_sform(input_data.header.get_sform())
         nib.save(sub_nifti, out_file)
 
         print('Subtracted point ' + str(image_to_subtract_num) + ' from ' + str(in_image_num))
@@ -627,6 +630,8 @@ class Process3DFLAIR():
                                     voxel_intensities[0,n] = images[n][i,j,k]
                                 # calculate variance 
                                 variances[i,j,k] = np.var(voxel_intensities)
+
+        print("Calculated variance map.")
 
         # save variance map
         var_nifti = nib.Nifti1Image(variances, affine=None)
@@ -839,11 +844,11 @@ if __name__ == "__main__":
     print(subject_info_df) # print current subject info
 
     # select a test patient from the information list
-    test_subject_id = subject_info_df.Subject_ID[0]
-    test_total_num_time_points = 6# auto use all from excel sheet
+    test_subject_id = subject_info_df.Subject_ID[2]
+    test_total_num_time_points = 4# auto use all from excel sheet
     
     # select the time points we want to consider in analysis
-    test_time_points_to_consider = [1,2,3,4,5,6]
+    test_time_points_to_consider = [1,2,3,4]
 
     # define the type of registration we'd like to use
     registration_method = 'affinefsl'
@@ -866,24 +871,25 @@ if __name__ == "__main__":
 
     
     
-    """
+    
     # run subtraction
-    out_file = "/home/ela/Documents/B-RAPIDD/B-RAP_0100/3D-FLAIR/subtraction_maps/affine/intersubject_normalised/5_minus_4.nii.gz"
+    out_file = "/home/ela/Documents/B-RAPIDD/B-RAP_0147/3D-FLAIR/subtraction_maps/B-RAP_0147_most_change_map.nii.gz"
 
     # minus non-ARIA from ARIA
-    in_image_num = 5 #3
-    image_to_subtract_num = 4 #1
+    in_image_num = 4 #3
+    image_to_subtract_num = 1 #1
     testProcess3DFLAIR.subtractImages(in_image_num, image_to_subtract_num, out_file, threshold = False)
     #testProcess3DFLAIR.runSubtraction(in_image_num, image_to_subtract_num, out_file)
     
-    """
 
+
+    """
     
     # run gradient map calculation
     out_folder = "/home/ela/Documents/B-RAPIDD/B-RAP_0027/3D-FLAIR/gradient_maps/"
     days_between_scans = [0, 133, 232, 283, 296, 324]
     testProcess3DFLAIR.calcGradientMaps(out_folder, days_between_scans)
-  
+    """
     
 
     """
